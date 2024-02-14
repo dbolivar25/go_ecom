@@ -3,7 +3,9 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"os"
 
+	_ "github.com/joho/godotenv/autoload"
 	"github.com/lib/pq"
 )
 
@@ -22,6 +24,7 @@ type Storage interface {
 	DeleteUserAccount(int32) error
 	AddItemToUserAccount(int32, int32) error
 	RemoveItemFromUserAccount(int32, int32) error
+	ClearUserItems(int32) error
 	GetUserAccounts() ([]*UserAccount, error)
 
 	// Item
@@ -31,6 +34,17 @@ type Storage interface {
 	DeleteItem(int32) error
 	GetItems() ([]*Item, error)
 	GetItemsById([]int32) ([]*Item, float64, error)
+
+	// Order
+	CreateOrder(*Order) error
+	UpdateOrder(*Order) error
+	GetOrder(int32) (*Order, error)
+	DeleteOrder(int32) error
+	GetOrders() ([]*Order, error)
+	GetOrdersById([]int32) ([]*Order, error)
+
+	Init() error
+	Close()
 }
 
 type PostgresStorage struct {
@@ -38,7 +52,11 @@ type PostgresStorage struct {
 }
 
 func NewPostgresStorage() (*PostgresStorage, error) {
-	connStr := "user=postgres dbname=postgres password=go_ecom sslmode=disable"
+	user := os.Getenv("POSTGRES_USER")
+	dbName := os.Getenv("POSTGRES_NAME")
+	password := os.Getenv("POSTGRES_PASS")
+
+	connStr := fmt.Sprintf("user=%s dbname=%s password=%s sslmode=disable", user, dbName, password)
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		return nil, err
@@ -61,6 +79,10 @@ func (self *PostgresStorage) Init() error {
 	}
 
 	if err := self.createItemTable(); err != nil {
+		return err
+	}
+
+	if err := self.createOrderTable(); err != nil {
 		return err
 	}
 
@@ -97,6 +119,7 @@ func (self *PostgresStorage) createUserAccountTable() error {
         username TEXT NOT NULL,
         auth_token TEXT NOT NULL,
         items INT[],
+        orders INT[],
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `)
@@ -111,6 +134,21 @@ func (self *PostgresStorage) createItemTable() error {
       name TEXT NOT NULL,
       description TEXT,
       price FLOAT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
+	return err
+}
+
+func (self *PostgresStorage) createOrderTable() error {
+	_, err := self.db.Exec(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id SERIAL PRIMARY KEY,
+      user_id INT,
+      items INT[],
+      total FLOAT,
+      status TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `)
@@ -137,10 +175,10 @@ func (self *PostgresStorage) CreateAdminAccount(account *AdminAccount) error {
 func (self *PostgresStorage) CreateUserAccount(account *UserAccount) error {
 	var id int
 	err := self.db.QueryRow(`
-    INSERT INTO users (username, auth_token, items, created_at)
-    VALUES ($1, $2, $3, $4)
+    INSERT INTO users (username, auth_token, items, orders, created_at)
+    VALUES ($1, $2, $3, $4, $5)
     RETURNING id
-  `, account.Username, account.AuthToken, pq.Array(account.Items), account.CreatedAt).Scan(&id)
+  `, account.Username, account.AuthToken, pq.Array(account.Items), pq.Array(account.Orders), account.CreatedAt).Scan(&id)
 	if err != nil {
 		return err
 	}
@@ -307,6 +345,16 @@ func (self *PostgresStorage) RemoveItemFromUserAccount(accountID, itemID int32) 
 	return nil
 }
 
+func (self *PostgresStorage) ClearUserItems(accountID int32) error {
+	_, err := self.db.Exec(`
+    UPDATE users
+    SET items = '{}'
+    WHERE id = $1
+  `, accountID)
+
+	return err
+}
+
 func (self *PostgresStorage) GetAdminAccounts() ([]*AdminAccount, error) {
 	rows, err := self.db.Query(`
     SELECT * FROM admins
@@ -372,6 +420,7 @@ func scanUserAccount(row *sql.Rows) (*UserAccount, error) {
 		&account.Username,
 		&account.AuthToken,
 		pq.Array(&account.Items),
+		pq.Array(&account.Orders),
 		&account.CreatedAt,
 	)
 
@@ -505,4 +554,144 @@ func scanItem(row *sql.Rows) (*Item, error) {
 	)
 
 	return item, err
+}
+
+func (self *PostgresStorage) CreateOrder(order *Order) error {
+	var id int
+	err := self.db.QueryRow(`
+    INSERT INTO orders (user_id, items, total, status, created_at)
+    VALUES ($1, $2, $3, $4, $5)
+    RETURNING id
+  `, order.UserID, pq.Array(order.Items), order.Total, order.Status, order.CreatedAt).Scan(&id)
+	if err != nil {
+		return err
+	}
+
+	order.ID = uint32(id)
+
+	err = self.db.QueryRow(`
+    UPDATE users
+    SET orders = array_append(orders, $1)
+    WHERE id = $2 
+    RETURNING id 
+  `, order.ID, order.UserID).Scan(&id)
+	if err != nil {
+		return err
+	}
+
+	if id == 0 {
+		return fmt.Errorf("User %d not found", order.UserID)
+	}
+
+	return nil
+}
+
+func (self *PostgresStorage) GetOrder(id int32) (*Order, error) {
+	rows, err := self.db.Query(`
+    SELECT * FROM orders WHERE id = $1
+  `, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		return scanOrder(rows)
+	}
+
+	return nil, fmt.Errorf("Order %d not found", id)
+}
+
+func (self *PostgresStorage) DeleteOrder(id int32) error {
+	res, err := self.db.Exec(`
+    DELETE FROM orders WHERE id = $1
+  `, id)
+	if err != nil {
+		return err
+	}
+
+	if count, _ := res.RowsAffected(); count == 0 {
+		return fmt.Errorf("Order %d not found", id)
+	}
+
+	return nil
+}
+
+func (self *PostgresStorage) UpdateOrder(order *Order) error {
+	res, err := self.db.Exec(`
+    UPDATE orders 
+    SET status = $1
+    WHERE id = $2
+  `, order.Status, order.ID)
+	if err != nil {
+		return err
+	}
+
+	if count, _ := res.RowsAffected(); count == 0 {
+		return fmt.Errorf("Order %d not found", order.ID)
+	}
+	return nil
+}
+
+func (self *PostgresStorage) GetOrders() ([]*Order, error) {
+	rows, err := self.db.Query(`
+    SELECT * FROM orders
+  `)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	orders := make([]*Order, 0)
+	for rows.Next() {
+		order, err := scanOrder(rows)
+		if err != nil {
+			return nil, err
+		}
+
+		orders = append(orders, order)
+	}
+
+	return orders, nil
+}
+
+func (self *PostgresStorage) GetOrdersById(ids []int32) ([]*Order, error) {
+	rows, err := self.db.Query(`
+    SELECT * FROM orders WHERE id = ANY($1)
+  `, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	orders := make([]*Order, 0)
+	for rows.Next() {
+		order, err := scanOrder(rows)
+		if err != nil {
+			return nil, err
+		}
+
+		orders = append(orders, order)
+	}
+
+	return orders, nil
+}
+
+func scanOrder(row *sql.Rows) (*Order, error) {
+	order := new(Order)
+
+	err := row.Scan(
+		&order.ID,
+		&order.UserID,
+		pq.Array(&order.Items),
+		&order.Total,
+		&order.Status,
+		&order.CreatedAt,
+	)
+
+	return order, err
+}
+
+func (self *PostgresStorage) Close() {
+	self.db.Close()
 }
