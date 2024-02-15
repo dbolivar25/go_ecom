@@ -4,7 +4,10 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/alexedwards/argon2id"
+	"github.com/golang-jwt/jwt/v4"
 	_ "github.com/joho/godotenv/autoload"
 	"github.com/lib/pq"
 )
@@ -12,6 +15,7 @@ import (
 type Storage interface {
 	// AdminAccount
 	CreateAdminAccount(*AdminAccount) error
+	LoginAdminAccount(string, string) (string, error)
 	UpdateAdminAccount(*AdminAccount) error
 	GetAdminAccount(int32) (*AdminAccount, error)
 	DeleteAdminAccount(int32) error
@@ -19,6 +23,7 @@ type Storage interface {
 
 	// UserAccount
 	CreateUserAccount(*UserAccount) error
+	LoginUserAccount(string, string) (string, error)
 	UpdateUserAccount(*UserAccount) error
 	GetUserAccount(int32) (*UserAccount, error)
 	DeleteUserAccount(int32) error
@@ -94,7 +99,8 @@ func (self *PostgresStorage) createAdminAccountTable() error {
       CREATE TABLE IF NOT EXISTS admins (
         id SERIAL PRIMARY KEY,
         username TEXT NOT NULL,
-        auth_token TEXT NOT NULL,
+        hashed_password TEXT NOT NULL,
+        auth_token TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `)
@@ -102,13 +108,22 @@ func (self *PostgresStorage) createAdminAccountTable() error {
 		return err
 	}
 
-	rootAccount := NewAdminAccount("root")
+	rootUser := os.Getenv("ROOT_USER")
+	rootPass := os.Getenv("ROOT_PASS")
+	if rootUser == "" || rootPass == "" {
+		return fmt.Errorf("ROOT_USER and ROOT_PASS must be set")
+	}
+
+	rootAccount, err := NewAdminAccount(rootUser, rootPass)
+	if err != nil {
+		return err
+	}
 
 	_, err = self.db.Exec(`
-      INSERT INTO admins (id, username, auth_token)
+      INSERT INTO admins (id, username, hashed_password)
       VALUES (1 ,$1, $2)
       ON CONFLICT DO NOTHING
-    `, rootAccount.Username, rootAccount.AuthToken)
+    `, rootAccount.Username, rootAccount.HashedPassword)
 	return err
 }
 
@@ -117,7 +132,8 @@ func (self *PostgresStorage) createUserAccountTable() error {
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username TEXT NOT NULL,
-        auth_token TEXT NOT NULL,
+        hashed_password TEXT NOT NULL,
+        auth_token TEXT,
         items INT[],
         orders INT[],
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -159,10 +175,10 @@ func (self *PostgresStorage) createOrderTable() error {
 func (self *PostgresStorage) CreateAdminAccount(account *AdminAccount) error {
 	var id int
 	err := self.db.QueryRow(`
-    INSERT INTO admins (username, auth_token, created_at)
+    INSERT INTO admins (username, hashed_password, created_at)
     VALUES ($1, $2, $3)
     RETURNING id
-  `, account.Username, account.AuthToken, account.CreatedAt).Scan(&id)
+  `, account.Username, account.HashedPassword, account.CreatedAt).Scan(&id)
 	if err != nil {
 		return err
 	}
@@ -175,10 +191,10 @@ func (self *PostgresStorage) CreateAdminAccount(account *AdminAccount) error {
 func (self *PostgresStorage) CreateUserAccount(account *UserAccount) error {
 	var id int
 	err := self.db.QueryRow(`
-    INSERT INTO users (username, auth_token, items, orders, created_at)
+    INSERT INTO users (username, hashed_password, items, orders, created_at)
     VALUES ($1, $2, $3, $4, $5)
     RETURNING id
-  `, account.Username, account.AuthToken, pq.Array(account.Items), pq.Array(account.Orders), account.CreatedAt).Scan(&id)
+  `, account.Username, account.HashedPassword, pq.Array(account.Items), pq.Array(account.Orders), account.CreatedAt).Scan(&id)
 	if err != nil {
 		return err
 	}
@@ -203,6 +219,106 @@ func (self *PostgresStorage) UpdateAdminAccount(account *AdminAccount) error {
 	}
 
 	return nil
+}
+
+func generateToken(id uint32, username string, secret string) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"id":       id,
+		"username": username,
+		"exp":      time.Now().Add(time.Hour * 24).Unix(),
+	})
+
+	return token.SignedString([]byte(secret))
+}
+
+func (self *PostgresStorage) LoginAdminAccount(username, password string) (string, error) {
+	rows, err := self.db.Query(`
+    SELECT * FROM admins WHERE username = $1
+  `, username)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		account, err := scanAdminAccount(rows)
+		if err != nil {
+			return "", err
+		}
+
+		if match, err := argon2id.ComparePasswordAndHash(password, account.HashedPassword); err != nil {
+			return "", err
+		} else if !match {
+			return "", fmt.Errorf("Invalid password")
+		} else {
+			// do NOTHING
+		}
+
+		// update auth token in db then return it
+		secret := os.Getenv("JWT_SECRET")
+		token, err := generateToken(account.ID, account.Username, secret)
+		if err != nil {
+			return "", err
+		}
+
+		_, err = self.db.Exec(`
+      UPDATE admins
+      SET auth_token = $1
+      WHERE id = $2 
+    `, token, account.ID)
+		if err != nil {
+			return "", err
+		}
+
+		return token, nil
+	}
+
+	return "", fmt.Errorf("Account %s not found", username)
+}
+
+func (self *PostgresStorage) LoginUserAccount(username, password string) (string, error) {
+	rows, err := self.db.Query(`
+    SELECT * FROM users WHERE username = $1
+  `, username)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		account, err := scanUserAccount(rows)
+		if err != nil {
+			return "", err
+		}
+
+		if match, err := argon2id.ComparePasswordAndHash(password, account.HashedPassword); err != nil {
+			return "", err
+		} else if !match {
+			return "", fmt.Errorf("Invalid password")
+		} else {
+			// do nothing
+		}
+
+		// update auth token in db then return it
+		secret := os.Getenv("JWT_SECRET")
+		token, err := generateToken(account.ID, account.Username, secret)
+		if err != nil {
+			return "", err
+		}
+
+		_, err = self.db.Exec(`
+      UPDATE users
+      SET auth_token = $1
+      WHERE id = $2 
+    `, token, account.ID)
+		if err != nil {
+			return "", err
+		}
+
+		return token, nil
+	}
+
+	return "", fmt.Errorf("Account %s not found", username)
 }
 
 func (self *PostgresStorage) UpdateUserAccount(account *UserAccount) error {
@@ -401,11 +517,13 @@ func (self *PostgresStorage) GetUserAccounts() ([]*UserAccount, error) {
 
 func scanAdminAccount(row *sql.Rows) (*AdminAccount, error) {
 	account := new(AdminAccount)
+	throwaway := new(string)
 
 	err := row.Scan(
 		&account.ID,
 		&account.Username,
-		&account.AuthToken,
+		&account.HashedPassword,
+		&throwaway,
 		&account.CreatedAt,
 	)
 
@@ -414,11 +532,13 @@ func scanAdminAccount(row *sql.Rows) (*AdminAccount, error) {
 
 func scanUserAccount(row *sql.Rows) (*UserAccount, error) {
 	account := new(UserAccount)
+	throwaway := new(string)
 
 	err := row.Scan(
 		&account.ID,
 		&account.Username,
-		&account.AuthToken,
+		&account.HashedPassword,
+		&throwaway,
 		pq.Array(&account.Items),
 		pq.Array(&account.Orders),
 		&account.CreatedAt,

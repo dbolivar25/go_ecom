@@ -23,6 +23,7 @@ func NewAPIServer(portAddress string, storage Storage) *APIServer {
 func (self *APIServer) Run() {
 	router := mux.NewRouter()
 
+	router.HandleFunc("/admin/login", makeHTTPHandlerFunc(self.handleAdminLogin))
 	router.HandleFunc("/admin/{id}", withJWTAdminAuth(makeHTTPHandlerFunc(self.handleAdminAccessAdmin), self.storage))
 	router.HandleFunc("/admin/{id}/dash", withJWTAdminAuth(makeHTTPHandlerFunc(self.handleAdminAccessDashboard), self.storage))
 	router.HandleFunc("/admin/{id}/admins", withJWTAdminAuth(makeHTTPHandlerFunc(self.handleAdminAccessAdmins), self.storage))
@@ -32,6 +33,7 @@ func (self *APIServer) Run() {
 	router.HandleFunc("/admin/{id}/orders", withJWTAdminAuth(makeHTTPHandlerFunc(self.handleAdminAccessOrders), self.storage))
 	router.HandleFunc("/admin/{id}/orders/{order_id}", withJWTAdminAuth(makeHTTPHandlerFunc(self.handleAdminAccessOrder), self.storage))
 
+	router.HandleFunc("/user/login", makeHTTPHandlerFunc(self.handleUserLogin))
 	router.HandleFunc("/user/signup", makeHTTPHandlerFunc(self.handleNewUser))
 	router.HandleFunc("/user/{id}", withJWTUserAuth(makeHTTPHandlerFunc(self.handleAccessUser), self.storage))
 	router.HandleFunc("/user/{id}/items", withJWTUserAuth(makeHTTPHandlerFunc(self.handleAccessUserItems), self.storage))
@@ -43,6 +45,15 @@ func (self *APIServer) Run() {
 	log.Println("Running on port", self.portAddress)
 
 	http.ListenAndServe(self.portAddress, router)
+}
+
+func (self *APIServer) handleAdminLogin(w http.ResponseWriter, r *http.Request) error {
+	switch r.Method {
+	case "POST":
+		return self.handlePostAdminLogin(w, r)
+	}
+
+	return fmt.Errorf("Invalid method: \"%s\"", r.Method)
 }
 
 func (self *APIServer) handleAdminAccessAdmin(w http.ResponseWriter, r *http.Request) error {
@@ -139,6 +150,15 @@ func (self *APIServer) handleAdminAccessOrder(w http.ResponseWriter, r *http.Req
 	return fmt.Errorf("Invalid method: \"%s\"", r.Method)
 }
 
+func (self *APIServer) handleUserLogin(w http.ResponseWriter, r *http.Request) error {
+	switch r.Method {
+	case "POST":
+		return self.handlePostUserLogin(w, r)
+	}
+
+	return fmt.Errorf("Invalid method: \"%s\"", r.Method)
+}
+
 func (self *APIServer) handleNewUser(w http.ResponseWriter, r *http.Request) error {
 	switch r.Method {
 	case "POST":
@@ -210,6 +230,24 @@ func (self *APIServer) handleAccessItem(w http.ResponseWriter, r *http.Request) 
 
 // method specific handlers
 
+func (self *APIServer) handlePostAdminLogin(w http.ResponseWriter, r *http.Request) error {
+	loginRequest := new(LoginRequest)
+	jsonDecoderHandle := json.NewDecoder(r.Body)
+	jsonDecoderHandle.DisallowUnknownFields()
+	if err := jsonDecoderHandle.Decode(&loginRequest); err != nil {
+		return err
+	}
+
+	auth_token, err := self.storage.LoginAdminAccount(loginRequest.Username, loginRequest.Password)
+	if err != nil {
+		return err
+	}
+
+	return WriteJSON(w, http.StatusOK, struct {
+		AuthToken string `json:"auth_token"`
+	}{auth_token})
+}
+
 func (self *APIServer) handleGetAdminAccount(w http.ResponseWriter, r *http.Request) error {
 	id, err := getID(r)
 	if err != nil {
@@ -220,6 +258,8 @@ func (self *APIServer) handleGetAdminAccount(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		return err
 	}
+
+	account.HashedPassword = ""
 
 	return WriteJSON(w, http.StatusOK, account)
 }
@@ -257,9 +297,17 @@ func (self *APIServer) handleGetDashboard(w http.ResponseWriter, r *http.Request
 		return err
 	}
 
+	for _, admin := range admins {
+		admin.HashedPassword = ""
+	}
+
 	users, err := self.storage.GetUserAccounts()
 	if err != nil {
 		return err
+	}
+
+	for _, user := range users {
+		user.HashedPassword = ""
 	}
 
 	items, err := self.storage.GetItems()
@@ -290,6 +338,10 @@ func (self *APIServer) handleGetAdminAccounts(w http.ResponseWriter, r *http.Req
 		return err
 	}
 
+	for _, account := range accounts {
+		account.HashedPassword = ""
+	}
+
 	return WriteJSON(w, http.StatusOK, accounts)
 }
 
@@ -301,10 +353,16 @@ func (self *APIServer) handleCreateAdminAccount(w http.ResponseWriter, r *http.R
 		return err
 	}
 
-	account := NewAdminAccount(createAdminAccountRequest.Username)
+	account, err := NewAdminAccount(createAdminAccountRequest.Username, createAdminAccountRequest.Password)
+	if err != nil {
+		return err
+	}
+
 	if err := self.storage.CreateAdminAccount(account); err != nil {
 		return err
 	}
+
+	account.HashedPassword = ""
 
 	return WriteJSON(w, http.StatusOK, account)
 }
@@ -332,7 +390,29 @@ func (self *APIServer) handleGetUserAccounts(w http.ResponseWriter, r *http.Requ
 		return err
 	}
 
+	for _, account := range accounts {
+		account.HashedPassword = ""
+	}
+
 	return WriteJSON(w, http.StatusOK, accounts)
+}
+
+func (self *APIServer) handlePostUserLogin(w http.ResponseWriter, r *http.Request) error {
+	loginRequest := new(LoginRequest)
+	jsonDecoderHandle := json.NewDecoder(r.Body)
+	jsonDecoderHandle.DisallowUnknownFields()
+	if err := jsonDecoderHandle.Decode(&loginRequest); err != nil {
+		return err
+	}
+
+	auth_token, err := self.storage.LoginUserAccount(loginRequest.Username, loginRequest.Password)
+	if err != nil {
+		return err
+	}
+
+	return WriteJSON(w, http.StatusOK, struct {
+		AuthToken string `json:"auth_token"`
+	}{auth_token})
 }
 
 func (self *APIServer) handleCreateUserAccount(w http.ResponseWriter, r *http.Request) error {
@@ -343,10 +423,16 @@ func (self *APIServer) handleCreateUserAccount(w http.ResponseWriter, r *http.Re
 		return err
 	}
 
-	account := NewUserAccount(createUserAccountRequest.Username)
+	account, err := NewUserAccount(createUserAccountRequest.Username, createUserAccountRequest.Password)
+	if err != nil {
+		return err
+	}
+
 	if err := self.storage.CreateUserAccount(account); err != nil {
 		return err
 	}
+
+	account.HashedPassword = ""
 
 	return WriteJSON(w, http.StatusOK, account)
 }
@@ -378,6 +464,8 @@ func (self *APIServer) handleGetUserAccount(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		return err
 	}
+
+	account.HashedPassword = ""
 
 	return WriteJSON(w, http.StatusOK, account)
 }
@@ -763,12 +851,6 @@ func withJWTAdminAuth(handler http.HandlerFunc, storage Storage) http.HandlerFun
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("auth_token")
 
-		// TODO: remove this
-		if authHeader == "root_token" {
-			handler(w, r)
-			return
-		}
-
 		token, err := validateJWT(authHeader)
 		if err != nil || !token.Valid {
 			WriteJSON(w, http.StatusUnauthorized, ApiError{Error: "Unauthorized"})
@@ -776,7 +858,6 @@ func withJWTAdminAuth(handler http.HandlerFunc, storage Storage) http.HandlerFun
 		}
 
 		claims := token.Claims.(jwt.MapClaims)
-		// log.Println(claims)
 
 		id, err := getID(r)
 		if err != nil {
@@ -784,13 +865,18 @@ func withJWTAdminAuth(handler http.HandlerFunc, storage Storage) http.HandlerFun
 			return
 		}
 
-		account, err := storage.GetAdminAccount(int32(id))
-		if err != nil {
-			WriteJSON(w, http.StatusBadRequest, ApiError{Error: err.Error()})
+		if claimId := int32(claims["id"].(float64)); claimId != id {
+			WriteJSON(w, http.StatusUnauthorized, ApiError{Error: "Unauthorized"})
 			return
 		}
 
-		if claims["username"] != account.Username {
+		account, err := storage.GetAdminAccount(id)
+		if err != nil {
+			WriteJSON(w, http.StatusUnauthorized, ApiError{Error: "Unauthorized"})
+			return
+		}
+
+		if account.Username != claims["username"] {
 			WriteJSON(w, http.StatusUnauthorized, ApiError{Error: "Unauthorized"})
 			return
 		}
@@ -803,12 +889,6 @@ func withJWTUserAuth(handler http.HandlerFunc, storage Storage) http.HandlerFunc
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("auth_token")
 
-		// TODO: remove this
-		if authHeader == "root_token" {
-			handler(w, r)
-			return
-		}
-
 		token, err := validateJWT(authHeader)
 		if err != nil || !token.Valid {
 			WriteJSON(w, http.StatusUnauthorized, ApiError{Error: "Unauthorized"})
@@ -816,7 +896,6 @@ func withJWTUserAuth(handler http.HandlerFunc, storage Storage) http.HandlerFunc
 		}
 
 		claims := token.Claims.(jwt.MapClaims)
-		// log.Println(claims)
 
 		// verify that the user id in the url path matches the user id in the Token
 		id, err := getID(r)
@@ -825,13 +904,23 @@ func withJWTUserAuth(handler http.HandlerFunc, storage Storage) http.HandlerFunc
 			return
 		}
 
-		account, err := storage.GetUserAccount(int32(id))
-		if err != nil {
-			WriteJSON(w, http.StatusBadRequest, ApiError{Error: err.Error()})
+		if claimId := int32(claims["id"].(float64)); claimId != id {
+			WriteJSON(w, http.StatusUnauthorized, ApiError{Error: "Unauthorized"})
 			return
 		}
 
-		if claims["username"] != account.Username {
+		account, err := storage.GetUserAccount(id)
+		if err != nil {
+			WriteJSON(w, http.StatusUnauthorized, ApiError{Error: "Unauthorized"})
+			return
+		}
+
+		if account.Username != claims["username"] {
+			WriteJSON(w, http.StatusUnauthorized, ApiError{Error: "Unauthorized"})
+			return
+		}
+
+		if int64(claims["exp"].(float64)) < time.Now().Unix() {
 			WriteJSON(w, http.StatusUnauthorized, ApiError{Error: "Unauthorized"})
 			return
 		}

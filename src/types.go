@@ -2,10 +2,10 @@ package main
 
 import (
 	"net/http"
-	"os"
 	"time"
 
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/alexedwards/argon2id"
+	// "github.com/golang-jwt/jwt/v4"
 )
 
 type apiFunc func(http.ResponseWriter, *http.Request) error
@@ -21,6 +21,12 @@ type APIServer struct {
 
 type CreateAccountRequest struct {
 	Username string `json:"user"`
+  Password string `json:"password"`
+}
+
+type LoginRequest struct {
+	Username string `json:"user"`
+	Password string `json:"password"`
 }
 
 type DeleteAccountRequest struct {
@@ -87,57 +93,47 @@ func NewItem(name, description string, price float64) *Item {
 }
 
 type AdminAccount struct {
-	ID        uint32    `json:"id"`
-	Username  string    `json:"username"`
-	AuthToken string    `json:"auth_token"`
-	CreatedAt time.Time `json:"created_at"`
+	ID             uint32    `json:"id"`
+	Username       string    `json:"username"`
+	HashedPassword string    `json:"hashed_password"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
-func NewAdminAccount(username string) *AdminAccount {
-	env := os.Getenv("JWT_SECRET")
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"username": username,
-	})
-
-	tokenString, err := token.SignedString([]byte(env))
+func NewAdminAccount(username string, password string) (*AdminAccount, error) {
+	hashedPassword, err := argon2id.CreateHash(password, argon2id.DefaultParams)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	return &AdminAccount{
-		Username:  username,
-		AuthToken: tokenString,
-		CreatedAt: time.Now().UTC(),
-	}
+		Username:       username,
+		HashedPassword: hashedPassword,
+		CreatedAt:      time.Now().UTC(),
+	}, nil
 }
 
 type UserAccount struct {
-	ID        uint32    `json:"id"`
-	Username  string    `json:"username"`
-	AuthToken string    `json:"auth_token"`
-	Items     []int32   `json:"items"`
-	Orders    []int32   `json:"orders"`
-	CreatedAt time.Time `json:"created_at"`
+	ID             uint32    `json:"id"`
+	Username       string    `json:"username"`
+	HashedPassword string    `json:"hashed_password"`
+	Items          []int32   `json:"items"`
+	Orders         []int32   `json:"orders"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
-func NewUserAccount(username string) *UserAccount {
-	env := os.Getenv("JWT_SECRET")
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"username": username,
-	})
-
-	tokenString, err := token.SignedString([]byte(env))
+func NewUserAccount(username string, password string) (*UserAccount, error) {
+	hashedPassword, err := argon2id.CreateHash(password, argon2id.DefaultParams)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	return &UserAccount{
-		Username:  username,
-		AuthToken: tokenString,
-		Items:     make([]int32, 0),
-    Orders:    make([]int32, 0),
-		CreatedAt: time.Now().UTC(),
-	}
+		Username:       username,
+		HashedPassword: hashedPassword,
+		Items:          make([]int32, 0),
+		Orders:         make([]int32, 0),
+		CreatedAt:      time.Now().UTC(),
+	}, nil
 }
 
 type Order struct {
