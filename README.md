@@ -15,6 +15,8 @@ processing.
 4. **Running the Service:** Execute go run . to start the Go_Ecom service.## API
    Endpoints
 
+## API
+
 ### Admin Authentication
 
 - `/admin/login`: Login to admin account and obtain JWT.
