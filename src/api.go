@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -849,9 +850,15 @@ func validateJWT(token string) (*jwt.Token, error) {
 
 func withJWTAdminAuth(handler http.HandlerFunc, storage Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("auth_token")
+		authHeader := r.Header.Get("Authorization")
+		splitToken := strings.Split(authHeader, "Bearer ")
+		if len(splitToken) != 2 {
+			WriteJSON(w, http.StatusUnauthorized, ApiError{Error: "Unauthorized"})
+			return
+		}
+		tokenString := splitToken[1]
 
-		token, err := validateJWT(authHeader)
+		token, err := validateJWT(tokenString)
 		if err != nil || !token.Valid {
 			WriteJSON(w, http.StatusUnauthorized, ApiError{Error: "Unauthorized"})
 			return
@@ -887,9 +894,15 @@ func withJWTAdminAuth(handler http.HandlerFunc, storage Storage) http.HandlerFun
 
 func withJWTUserAuth(handler http.HandlerFunc, storage Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("auth_token")
+		authHeader := r.Header.Get("Authorization")
+		splitToken := strings.Split(authHeader, "Bearer ")
+		if len(splitToken) != 2 {
+			WriteJSON(w, http.StatusUnauthorized, ApiError{Error: "Unauthorized"})
+			return
+		}
+		tokenString := splitToken[1]
 
-		token, err := validateJWT(authHeader)
+		token, err := validateJWT(tokenString)
 		if err != nil || !token.Valid {
 			WriteJSON(w, http.StatusUnauthorized, ApiError{Error: "Unauthorized"})
 			return
