@@ -13,10 +13,9 @@ processing.
    store environment variables
    `POSTGRES_USER, POSTGRES_NAME, POSTGRES_PASS, PORT, ROOT_USER, ROOT_PASS, and JWT_SECRET`.
 3. **Dependencies:** Use go mod tidy to install the required Go packages.
-4. **Running the Service:** Execute go run . to start the Go_Ecom service.## API
-   Endpoints
+4. **Running the Service:** Execute go run . to start the Go_Ecom service.
 
-## API Overview
+## API Endpoints
 
 ### Admin Authentication
 
