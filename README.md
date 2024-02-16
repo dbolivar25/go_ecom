@@ -10,7 +10,8 @@ processing.
 1. **Clone the Repository:** Clone Go_Ecom to your machine and navigate into the
    project directory.
 2. **Environment Configuration:** Create a .env file at the project root to
-   store environment variables like the database connection and JWT secret.
+   store environment variables
+   `POSTGRES_USER, POSTGRES_NAME, POSTGRES_PASS, PORT, ROOT_USER, ROOT_PASS, and JWT_SECRET`.
 3. **Dependencies:** Use go mod tidy to install the required Go packages.
 4. **Running the Service:** Execute go run . to start the Go_Ecom service.## API
    Endpoints
