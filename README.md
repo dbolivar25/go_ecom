@@ -1,155 +1,237 @@
 # go_ecom
 
-go_ecom is a Go-based eCommerce API designed for managing online store
-operations. It supports account management, item cataloging, and order
-processing with secure authentication. The API provides structured endpoints for
-both user and admin functions, enabling straightforward integration and backend
-management for eCommerce platforms.
+Go_Ecom is a comprehensive eCommerce API developed in Go, designed to manage
+online stores efficiently. It provides a secure and scalable way to handle user
+and admin operations, including account management, item cataloging, and order
+processing.
 
 ## Installation and Setup
 
-To get go_ecom up and running, follow these steps:
+1. **Clone the Repository:** Clone Go_Ecom to your machine and navigate into the
+   project directory.
+2. **Environment Configuration:** Create a .env file at the project root to
+   store environment variables like the database connection and JWT secret.
+3. **Dependencies:** Use go mod tidy to install the required Go packages.
+4. **Running the Service:** Execute go run . to start the Go_Ecom service.## API
+   Endpoints
 
-1. **Clone the Repository**
+### Admin Authentication
 
-   - Clone go_ecom to your local machine using Git:
-     ```
-     git clone git@github.com:dbolivar25/go_ecom.git
-     ```
-   - Navigate into the cloned repository:
-     ```
-     cd go_ecom
-     ```
+- `/admin/login`: Login to admin account and obtain JWT.
 
-2. **Set Up the Environment**
+### Admin Management
 
-   - Create a `.env` file in the root of your project directory. This file will
-     store environment variables such as database connection details and the JWT
-     secret key. Here's an example of what your `.env` file should contain:
+- `/admin/{id}`: View and update admin account details.
+- `/admin/{id}/dash`: View dashboard data.
+- `/admin/{id}/admins`: Manage admin accounts.
+- `/admin/{id}/users`: Manage user accounts.
+- `/admin/{id}/items`: View and manage item catalog.
+- `/admin/{id}/orders`: View and manage orders.
+- `/admin/{id}/items/{item_id}`: View and update specific item details.
+- `/admin/{id}/orders/{order_id}`: View and update specific order details.
 
-     ```
-     POSTGRES_USER=<user>
-     POSTGRES_NAME=<name>
-     POSTGRES_PASS=<pass>
+### User Authentication
 
-     PORT=<port>
+- `/user/login`: Login to user account and obtain JWT.
+- `/user/signup`: Create user account.
 
-     JWT_SECRET=<secret>
-     ```
+### User Management
 
-3. **Install Dependencies**
+- `/user/{id}`: View and update user account details.
+- `/user/{id}/items`: View and manage items in the user's account.
+- `/user/{id}/checkout`: Process checkout.
+- `/user/{id}/orders`: View user's orders.
 
-   - go_ecom requires certain Go packages to function properly. Install these by
-     running:
-     ```
-     go mod tidy
-     ```
-     This command downloads the necessary packages as defined in `go.mod`.
+### General Item Management
 
-4. **Run the Application**
-   - With the dependencies installed and the environment variables set, you can
-     now run the API:
-     ```
-     go run .
-     ```
-     This starts the go_ecom service, making it listen for requests as per the
-     configuration in your code.
-
-By following these steps, you'll have a local instance of go_ecom running, ready
-to handle eCommerce operations through its API endpoints.
-
-## Endpoints
-
-- `/admin/{id}`
-- `/admin/{id}/dash`
-- `/admin/{id}/admins`
-- `/admin/{id}/users`
-- `/admin/{id}/items`
-- `/admin/{id}/items/{item_id}`
-- `/admin/{id}/orders`
-- `/admin/{id}/orders/{order_id}`
-
-- `/user`
-- `/user/{id}`
-- `/user/{id}/items`
-- `/user/{id}/checkout`
-- `/user/{id}/orders`
-
-- `/items`
-- `/items/{id}`
+- `/items`: View the item catalog.
+- `/items/{id}`: View details of a specific item.
 
 ## Documentation
 
-### `/admin/{id}`
+### Authentication Endpoints
 
-- **GET**: Retrieves the details of an admin account.
-- **PUT**: Updates an existing admin account.
+#### Admin Login
 
-### `/admin/{id}/dash`
+- **POST** `/admin/login`
+  - **Payload**:
+    ```json
+    {
+      "user": "adminUsername",
+      "password": "adminPassword"
+    }
+    ```
+  - **Response**: Returns a JWT token for authentication.
 
-- **GET**: Fetches dashboard data for an admin.
+#### User Login
 
-### `/admin/{id}/admins`
+- **POST** `/user/login`
+  - **Payload**:
+    ```json
+    {
+      "user": "userUsername",
+      "password": "userPassword"
+    }
+    ```
+  - **Response**: Returns a JWT token for authentication.
 
-- **GET**: Retrieves a list of all admin accounts.
-- **POST**: Creates a new admin account.
-- **DELETE**: Deletes an admin account.
+#### User Signup
 
-### `/admin/{id}/users`
+- **POST** `/user/signup`
+  - **Payload**:
+    ```json
+    {
+      "user": "newUserUsername",
+      "password": "newUserPassword"
+    }
+    ```
+  - **Response**: Returns a newly created user account object.
 
-- **GET**: Fetches a list of all user accounts.
-- **POST**: Creates a new user account.
-- **DELETE**: Deletes a user account.
+### Admin Operations
 
-### `/admin/{id}/items`
+#### Admin Account Access and Modification
 
-- **GET**: Retrieves a list of all items in the catalog.
-- **POST**: Adds a new item to the catalog.
-- **DELETE**: Removes an item from the catalog.
+- **GET, PUT** `/admin/{id}`
+  - **PUT Payload**:
+    ```json
+    {
+      "user": "updatedAdminUsername"
+    }
+    ```
+  - **Response**: For `PUT`, returns the updated admin account details.
 
-### `/admin/{id}/items/{item_id}`
+#### Dashboard Access
 
-- **GET**: Fetches details of a specific item.
-- **PUT**: Updates the details of a specific item.
+- **GET** `/admin/{id}/dash`
+  - **Response**: Returns dashboard data including admin and user metrics.
 
-### `/admin/{id}/orders`
+#### Admin Account Management
 
-- **GET**: Retrieves a list of all orders.
-- **POST**: Creates a new order.
-- **DELETE**: Deletes an order.
+- **GET, POST, DELETE** `/admin/{id}/admins`
+  - **POST Payload**:
+    ```json
+    {
+      "user": "newAdminUsername",
+      "password": "newAdminPassword"
+    }
+    ```
+  - **DELETE Payload**:
+    ```json
+    {
+      "id": 123
+    }
+    ```
+  - **Response**: For `POST`, returns the newly created admin account. For
+    `DELETE`, confirms deletion.
 
-### `/admin/{id}/orders/{order_id}`
+#### User Account Management
 
-- **GET**: Fetches details of a specific order.
-- **PUT**: Updates the details of a specific order.
+- **GET, POST, DELETE** `/admin/{id}/users`
+  - **POST Payload**:
+    ```json
+    {
+      "user": "newUserUsername",
+      "password": "newUserPassword"
+    }
+    ```
+  - **DELETE Payload**:
+    ```json
+    {
+      "id": 456
+    }
+    ```
+  - **Response**: For `POST`, returns the newly created user account. For
+    `DELETE`, confirms deletion.
 
-### `/user`
+#### Item Catalog Management
 
-- **POST**: Registers a new user account.
+- **GET, POST, DELETE** `/admin/{id}/items`
+  - **POST Payload**:
+    ```json
+    {
+      "name": "NewItemName",
+      "desc": "NewItemDescription",
+      "price": 99.99
+    }
+    ```
+  - **DELETE Payload**:
+    ```json
+    {
+      "id": 789
+    }
+    ```
+  - **Response**: For `POST`, returns the newly added item. For `DELETE`,
+    confirms deletion.
 
-### `/user/{id}`
+#### Order Management
 
-- **GET**: Retrieves the details of a user account.
-- **PUT**: Updates an existing user account.
+- **GET, POST, DELETE** `/admin/{id}/orders`
+  - **POST Payload**:
+    ```json
+    {
+      "account_id": 456,
+      "items": [789, 1011],
+      "total": 199.98
+    }
+    ```
+  - **DELETE Payload**:
+    ```json
+    {
+      "id": 11213
+    }
+    ```
+  - **Response**: For `POST`, returns the newly created order. For `DELETE`,
+    confirms deletion.
 
-### `/user/{id}/items`
+### User Operations
 
-- **GET**: Lists the items associated with a user's account.
-- **POST**: Adds an item to a user's account.
-- **DELETE**: Removes an item from a user's account.
+#### User Account and Item Management
 
-### `/user/{id}/checkout`
+- **GET, PUT** `/user/{id}`
+  - **PUT Payload**:
+    ```json
+    {
+      "user": "updatedUserUsername"
+    }
+    ```
+  - **Response**: Returns the updated user account details.
 
-- **POST**: Processes a checkout operation for the items in a user's account.
+#### Item Management in User Account
 
-### `/user/{id}/orders`
+- **POST, DELETE** `/user/{id}/items`
+  - **POST Payload**:
+    ```json
+    {
+      "item_id": 789
+    }
+    ```
+  - **DELETE Payload**:
+    ```json
+    {
+      "item_id": 789
+    }
+    ```
+  - **Response**: For `POST`, confirms item addition. For `DELETE`, confirms
+    item removal.
 
-- **GET**: Lists all orders associated with a user's account.
+#### Checkout
 
-### `/items`
+- **POST** `/user/{id}/checkout`
+  - **Response**: Processes the checkout and returns the created order object.
 
-- **GET**: Retrieves a list of all items available in the catalog.
+#### User Orders
 
-### `/items/{id}`
+- **GET** `/user/{id}/orders`
+  - **Response**: Returns a list of orders associated with the user's account.
 
-- **GET**: Fetches details of a specific item by its ID.
+### General Item Access
+
+#### Item Catalog
+
+- **GET** `/items`
+  - **Response**: Returns a list of all items in the catalog.
+
+#### Specific Item Details
+
+- **GET** `/items/{id}`
+  - **Response**: Returns details of a specific item.
